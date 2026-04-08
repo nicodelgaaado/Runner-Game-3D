@@ -1,10 +1,13 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using PathCreation; 
+using PathCreation;
 
 public class RedPlayerMovement : MonoBehaviour
 {
+    private const float RigidbodyDrag = 3f;
+    private const float RigidbodyAngularDrag = 10f;
+    private const string RedCollisionLayerName = "RedCollision";
+    private const string BlueCollisionLayerName = "BlueCollision";
 
     public float speed;
     private Animator animator;
@@ -16,10 +19,11 @@ public class RedPlayerMovement : MonoBehaviour
     public canvasManager canvasManager;
 
     public BluePlayerMovement bluePlayer;
-    public AudioSource Winsound; 
+    private ObstacleManager obstacleManager;
+    public AudioSource Winsound;
     public AudioSource deathSound;
     public AudioSource MagicTecles;
-    public AudioSource runningsound; 
+    public AudioSource runningsound;
 
     public PathCreator pathCreator1;
     public PathCreator pathCreator2;
@@ -31,7 +35,7 @@ public class RedPlayerMovement : MonoBehaviour
     public float forceGrupPunxes1;
     public float forceGrupPunxes2;
     public float forceGrupPunxes3;
-    public float forceGirador1; 
+    public float forceGirador1;
     public float forceGirador2;
 
     //Nivell 1
@@ -50,400 +54,449 @@ public class RedPlayerMovement : MonoBehaviour
 
     //Nivell 4
     public float forceMartell;
-    public float forceBoxe; 
-
-
+    public float forceBoxe;
 
 
     [HideInInspector]
     public int currentNivell;
-    private bool Falling; 
+    private bool Falling;
     float pathState;
     bool colisionat;
     bool fentRestart;
     bool canviantNivell;
     bool guanyatRed;
-    bool perdutRed; 
+    bool perdutRed;
+    bool moveForwardRequested;
+    bool waitForMoveKeyRelease;
 
 
-    // Start is called before the first frame update
     void Start()
     {
         animator = GetComponent<Animator>();
         myRigidbody = GetComponent<Rigidbody>();
-        myTransform = GetComponent<Transform>();
-        myRigidbody.sleepThreshold = 0.0f;
+        myTransform = transform;
+        CacheObstacleManager();
+        ConfigureRigidbody();
+        ConfigurePlayerCollisionLayers();
+        ResetMoveInputGate();
         canviantNivell = false;
         guanyatRed = false;
-        perdutRed = false; 
+        perdutRed = false;
         animator.SetBool("isFalling", false);
         animator.SetBool("RedCry", false);
         animator.SetBool("Climb", false);
         animator.SetBool("RedWin", false);
-        ComensaNivell(1); 
+        ComensaNivell(1);
+    }
 
+    private void Update()
+    {
+        moveForwardRequested = false;
+
+        if (canviantNivell || guanyatRed || perdutRed)
+        {
+            runningsound.Pause();
+            return;
+        }
+
+        if (TryHandleLevelChange())
+        {
+            return;
+        }
+
+        Falling = myRigidbody.velocity.y < FallingThreshold;
+        if (Falling)
+        {
+            runningsound.Pause();
+            animator.SetBool("isMoving", false);
+        }
+
+        if (colisionat)
+        {
+            if (!fentRestart)
+            {
+                runningsound.Pause();
+                animator.SetBool("isFalling", true);
+                fentRestart = true;
+                StartCoroutine(restartNivell());
+            }
+            return;
+        }
+
+        if (Falling || fentRestart)
+        {
+            return;
+        }
+
+        if (waitForMoveKeyRelease)
+        {
+            if (!IsMoveKeyPressed())
+            {
+                waitForMoveKeyRelease = false;
+            }
+
+            runningsound.Pause();
+            animator.SetBool("isMoving", false);
+            return;
+        }
+
+        moveForwardRequested = IsMoveKeyPressed();
+        if (moveForwardRequested)
+        {
+            if (!runningsound.isPlaying)
+            {
+                runningsound.Play();
+            }
+        }
+        else
+        {
+            runningsound.Pause();
+            animator.SetBool("isMoving", false);
+        }
+    }
+
+    private void FixedUpdate()
+    {
+        if (!moveForwardRequested || Falling || colisionat || fentRestart || canviantNivell || guanyatRed || perdutRed)
+        {
+            return;
+        }
+
+        if (currentNivell == 1)
+        {
+            MouNivell1();
+        }
+        else if (currentNivell == 2)
+        {
+            MouNivell2();
+        }
+        else if (currentNivell == 3)
+        {
+            MouNivell3();
+        }
+        else if (currentNivell == 4)
+        {
+            MouNivell4();
+        }
+        else if (currentNivell == 5)
+        {
+            MouNivell5();
+        }
     }
 
     private void OnCollisionEnter(Collision collision)
     {
-        if (collision.gameObject.name == "punxes1" || collision.gameObject.name == "punxes2" || collision.gameObject.name == "punxes3" || collision.gameObject.name == "punxes4")
-        {
-            myRigidbody.AddForce(new Vector3(-1f, 1f, -1f) * forceGrupPunxes1);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "punxes8")
-        {
-            myRigidbody.AddForce(new Vector3(0f, 1f, 1f) * forceGrupPunxes2);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "punxes11")
-        {
-            myRigidbody.AddForce(new Vector3(-1f, 1f, 0f) * forceGrupPunxes3);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "cGran1")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceGirador1);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "cGran2")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceGirador2);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "Torus1" || collision.gameObject.name == "Torus2")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceTorusNivell1);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "d2" || collision.gameObject.name == "d1" || collision.gameObject.name == "d3")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forced);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "f11" || collision.gameObject.name == "f22" || collision.gameObject.name == "f33" || collision.gameObject.name == "f44" || collision.gameObject.name == "f55" || collision.gameObject.name == "f66" || collision.gameObject.name == "f77")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forcePendulum);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "pal2aspa1" || collision.gameObject.name == "pal1aspa1" || collision.gameObject.name == "pal1aspa2" || collision.gameObject.name == "pal2aspa2")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceAspa);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "porta11" || collision.gameObject.name == "porta12" || collision.gameObject.name == "porta21" || collision.gameObject.name == "porta22" || collision.gameObject.name == "porta31" || collision.gameObject.name == "porta32" || collision.gameObject.name == "porta41" || collision.gameObject.name == "porta42")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forcePorta);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "Roda1Objecte1" || collision.gameObject.name == "Roda1Objecte2" || collision.gameObject.name == "Roda1Objecte3" || collision.gameObject.name == "Roda1Objecte4" || collision.gameObject.name == "Roda2Objecte1" || collision.gameObject.name == "Roda2Objecte2" || collision.gameObject.name == "Roda2Objecte3" || collision.gameObject.name == "Roda2Objecte4")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceRoda);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "d8")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forced);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "cGran3")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceGirador1);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "picMartell1" || collision.gameObject.name == "picMartell2" || collision.gameObject.name == "picMartell3" || collision.gameObject.name == "picMartell4" || collision.gameObject.name == "picMartell5" || collision.gameObject.name == "picMartell6" || collision.gameObject.name == "picMartell7" || collision.gameObject.name == "picMartell8")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceMartell);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "pal2aspa3" || collision.gameObject.name == "pal1aspa3" || collision.gameObject.name == "pal2aspa4" || collision.gameObject.name == "pal1aspa4")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceAspa);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "Torus3")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceTorusNivell1);
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
-        else if (collision.gameObject.name == "picoBoxa1" || collision.gameObject.name == "picoBoxa2" || collision.gameObject.name == "picoBoxa3" || collision.gameObject.name == "picoBoxa4")
-        {
-            myRigidbody.AddForce(collision.contacts[0].normal * forceBoxe);
-            myRigidbody.useGravity = true;
-            colisionat = true;
-            deathSound.Play();
-            animator.SetBool("isMoving", false);
-        }
+        string collisionName = collision.collider.name;
+        Vector3 collisionNormal = GetCollisionNormal(collision);
 
+        if (collisionName == "punxes1" || collisionName == "punxes2" || collisionName == "punxes3" || collisionName == "punxes4")
+        {
+            ApplyHit(new Vector3(-1f, 1f, -1f) * forceGrupPunxes1);
+        }
+        else if (collisionName == "punxes8")
+        {
+            ApplyHit(new Vector3(0f, 1f, 1f) * forceGrupPunxes2);
+        }
+        else if (collisionName == "punxes11")
+        {
+            ApplyHit(new Vector3(-1f, 1f, 0f) * forceGrupPunxes3);
+        }
+        else if (collisionName == "cGran1")
+        {
+            ApplyHit(collisionNormal * forceGirador1);
+        }
+        else if (collisionName == "cGran2")
+        {
+            ApplyHit(collisionNormal * forceGirador2);
+        }
+        else if (collisionName == "Torus1" || collisionName == "Torus2")
+        {
+            ApplyHit(collisionNormal * forceTorusNivell1);
+        }
+        else if (collisionName == "d2" || collisionName == "d1" || collisionName == "d3")
+        {
+            ApplyHit(collisionNormal * forced);
+        }
+        else if (collisionName == "f11" || collisionName == "f22" || collisionName == "f33" || collisionName == "f44" || collisionName == "f55" || collisionName == "f66" || collisionName == "f77")
+        {
+            ApplyHit(collisionNormal * forcePendulum);
+        }
+        else if (collisionName == "pal2aspa1" || collisionName == "pal1aspa1" || collisionName == "pal1aspa2" || collisionName == "pal2aspa2")
+        {
+            ApplyHit(collisionNormal * forceAspa);
+        }
+        else if (collisionName == "porta11" || collisionName == "porta12" || collisionName == "porta21" || collisionName == "porta22" || collisionName == "porta31" || collisionName == "porta32" || collisionName == "porta41" || collisionName == "porta42")
+        {
+            ApplyHit(collisionNormal * forcePorta);
+        }
+        else if (collisionName == "Roda1Objecte1" || collisionName == "Roda1Objecte2" || collisionName == "Roda1Objecte3" || collisionName == "Roda1Objecte4" || collisionName == "Roda2Objecte1" || collisionName == "Roda2Objecte2" || collisionName == "Roda2Objecte3" || collisionName == "Roda2Objecte4")
+        {
+            ApplyHit(collisionNormal * forceRoda);
+        }
+        else if (collisionName == "d8")
+        {
+            ApplyHit(collisionNormal * forced);
+        }
+        else if (collisionName == "cGran3")
+        {
+            ApplyHit(collisionNormal * forceGirador1);
+        }
+        else if (collisionName == "picMartell1" || collisionName == "picMartell2" || collisionName == "picMartell3" || collisionName == "picMartell4" || collisionName == "picMartell5" || collisionName == "picMartell6" || collisionName == "picMartell7" || collisionName == "picMartell8")
+        {
+            ApplyHit(collisionNormal * forceMartell);
+        }
+        else if (collisionName == "pal2aspa3" || collisionName == "pal1aspa3" || collisionName == "pal2aspa4" || collisionName == "pal1aspa4")
+        {
+            ApplyHit(collisionNormal * forceAspa);
+        }
+        else if (collisionName == "Torus3")
+        {
+            ApplyHit(collisionNormal * forceTorusNivell1);
+        }
+        else if (collisionName == "picoBoxa1" || collisionName == "picoBoxa2" || collisionName == "picoBoxa3" || collisionName == "picoBoxa4")
+        {
+            ApplyHit(collisionNormal * forceBoxe, true);
+        }
     }
 
-
-    // Update is called once per frame
-    void Update()
+    private bool TryHandleLevelChange()
     {
-
-        if (!canviantNivell && !guanyatRed && !perdutRed)
+        if (Input.GetKey(KeyCode.Alpha1) && currentNivell != 1)
         {
-            if ((Input.GetKey(KeyCode.Alpha1)) && (currentNivell != 1))
-            {
-                runningsound.Pause();
-                MagicTecles.Play();
-                canviantNivell = true;
-                animator.SetBool("isMoving", false);
-                animator.SetBool("isFalling", false);
-                StartCoroutine(canviaNivell(1)); 
-            }
-            else if ((Input.GetKey(KeyCode.Alpha2)) && (currentNivell != 2))
-            {
-                runningsound.Pause();
-                MagicTecles.Play();
-                canviantNivell = true;
-                animator.SetBool("isMoving", false);
-                animator.SetBool("isFalling", false);
-                StartCoroutine(canviaNivell(2));
-            }
-            else if ((Input.GetKey(KeyCode.Alpha3)) && (currentNivell != 3))
-            {
-                runningsound.Pause();
-                MagicTecles.Play();
-                canviantNivell = true;
-                animator.SetBool("isMoving", false);
-                animator.SetBool("isFalling", false);
-                StartCoroutine(canviaNivell(3));
-            }
-            else if ((Input.GetKey(KeyCode.Alpha4)) && (currentNivell != 4))
-            {
-                runningsound.Pause();
-                MagicTecles.Play();
-                canviantNivell = true;
-                animator.SetBool("isMoving", false);
-                animator.SetBool("isFalling", false);
-                StartCoroutine(canviaNivell(4));
-            }
-            else if ((Input.GetKey(KeyCode.Alpha5)) && (currentNivell != 5))
-            {
-                runningsound.Pause();
-                MagicTecles.Play();
-                canviantNivell = true;
-                animator.SetBool("isMoving", false);
-                animator.SetBool("isFalling", false);
-                StartCoroutine(canviaNivell(5));
-            }
-            else
-            {
-                if (myRigidbody.velocity.y < FallingThreshold)
-                {
-                    Falling = true;
-                    runningsound.Pause();
-                    animator.SetBool("isMoving", false);
-                }
-                else
-                {
-                    Falling = false;
-                }
-
-                if (!Falling && !colisionat && !fentRestart)
-                {
-                    if (Input.GetKey(KeyCode.W))
-                    {
-                        if (!runningsound.isPlaying)
-                        {
-                            runningsound.Play();
-                        }
-                        if (currentNivell == 1)
-                        {
-                            MouNivell1();
-                        }
-                        else if (currentNivell == 2)
-                        {
-                            MouNivell2();
-                        }
-                        else if (currentNivell == 3)
-                        {
-                            MouNivell3();
-                        }
-                        else if (currentNivell == 4)
-                        {
-                            MouNivell4();
-                        }
-                        else if (currentNivell == 5)
-                        {
-                            MouNivell5();
-                        }
-                    }
-                    else
-                    {
-                        runningsound.Pause();
-                        animator.SetBool("isMoving", false);
-                    }
-                }
-
-
-                else if (colisionat && !fentRestart)
-                { //reseteja 
-                    runningsound.Pause();
-                    animator.SetBool("isFalling", true);
-                    fentRestart = true;
-                    StartCoroutine(restartNivell());
-                }
-            }
-
+            BeginLevelChange(1);
+            return true;
         }
 
+        if (Input.GetKey(KeyCode.Alpha2) && currentNivell != 2)
+        {
+            BeginLevelChange(2);
+            return true;
+        }
 
+        if (Input.GetKey(KeyCode.Alpha3) && currentNivell != 3)
+        {
+            BeginLevelChange(3);
+            return true;
+        }
 
+        if (Input.GetKey(KeyCode.Alpha4) && currentNivell != 4)
+        {
+            BeginLevelChange(4);
+            return true;
+        }
+
+        if (Input.GetKey(KeyCode.Alpha5) && currentNivell != 5)
+        {
+            BeginLevelChange(5);
+            return true;
+        }
+
+        return false;
     }
 
+    private void BeginLevelChange(int nivell)
+    {
+        ResetMoveInputGate();
+        runningsound.Pause();
+        MagicTecles.Play();
+        canviantNivell = true;
+        animator.SetBool("isMoving", false);
+        animator.SetBool("isFalling", false);
+        StartCoroutine(canviaNivell(nivell));
+    }
 
+    private void ConfigureRigidbody()
+    {
+        myRigidbody.drag = RigidbodyDrag;
+        myRigidbody.angularDrag = RigidbodyAngularDrag;
+        myRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+        myRigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        myRigidbody.constraints = RigidbodyConstraints.FreezeRotation;
+    }
+
+    private void ConfigurePlayerCollisionLayers()
+    {
+        int redCollisionLayer = LayerMask.NameToLayer(RedCollisionLayerName);
+        int blueCollisionLayer = LayerMask.NameToLayer(BlueCollisionLayerName);
+
+        if (redCollisionLayer >= 0 && blueCollisionLayer >= 0)
+        {
+            Physics.IgnoreLayerCollision(redCollisionLayer, blueCollisionLayer, true);
+        }
+    }
+
+    private void ClearPhysicsMotion()
+    {
+        myRigidbody.velocity = Vector3.zero;
+        myRigidbody.angularVelocity = Vector3.zero;
+    }
+
+    private bool IsMoveKeyPressed()
+    {
+        return Input.GetKey(KeyCode.W);
+    }
+
+    private void ResetMoveInputGate()
+    {
+        moveForwardRequested = false;
+        waitForMoveKeyRelease = true;
+    }
+
+    private Vector3 GetCollisionNormal(Collision collision)
+    {
+        if (collision.contactCount > 0)
+        {
+            return collision.GetContact(0).normal;
+        }
+
+        return -myTransform.forward;
+    }
+
+    private void ApplyHit(Vector3 force, bool enableGravity = false)
+    {
+        if (colisionat)
+        {
+            return;
+        }
+
+        moveForwardRequested = false;
+        myRigidbody.angularVelocity = Vector3.zero;
+        if (enableGravity)
+        {
+            myRigidbody.useGravity = true;
+        }
+
+        myRigidbody.AddForce(force);
+        colisionat = true;
+        deathSound.Play();
+        animator.SetBool("isMoving", false);
+    }
 
     private void ComensaNivell(int nivell)
     {
+        CacheObstacleManager();
+        ConfigureRigidbody();
         myRigidbody.useGravity = true;
-        myRigidbody.velocity = Vector3.zero;
-        myRigidbody.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-        myRigidbody.velocity = Vector3.zero;
+        ClearPhysicsMotion();
+        ResetMoveInputGate();
         Falling = false;
         colisionat = false;
         currentNivell = nivell;
-        canvasManager.activaCanviaLevelText(currentNivell); 
-        //posicio i mirar en principi nivell
+        if (obstacleManager != null)
+        {
+            obstacleManager.SetActiveLevel(nivell);
+        }
+        canvasManager.activaCanviaLevelText(currentNivell);
         pathState = 0f;
+        animator.SetBool("isMoving", false);
+        animator.SetBool("Climb", false);
+
         if (nivell == 1)
         {
-            Vector3 pathPosition = pathCreator1.path.GetPointAtDistance(pathState);
-            //Vector3 pathPosition = pathCreator1.path.GetPointAtDistance(420f);
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3(5000f, 0f, 0f)); 
+            TeleportTo(pathCreator1.path.GetPointAtDistance(pathState), Quaternion.LookRotation(Vector3.right, Vector3.up));
         }
         else if (nivell == 2)
         {
-            Vector3 pathPosition = pathCreator2.path.GetPointAtDistance(pathState);
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3(0f, 0f, 5000f));
+            TeleportTo(pathCreator2.path.GetPointAtDistance(pathState), Quaternion.LookRotation(Vector3.forward, Vector3.up));
         }
         else if (nivell == 3)
         {
-            Vector3 pathPosition = pathCreator3.path.GetPointAtDistance(pathState);
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3(0f, 0f, 5000f));
+            TeleportTo(pathCreator3.path.GetPointAtDistance(pathState), Quaternion.LookRotation(Vector3.forward, Vector3.up));
         }
         else if (nivell == 4)
         {
-            Vector3 pathPosition = pathCreator4.path.GetPointAtDistance(pathState);
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3(0f, 0f, -5000f));
+            TeleportTo(pathCreator4.path.GetPointAtDistance(pathState), Quaternion.LookRotation(Vector3.back, Vector3.up));
         }
         else if (nivell == 5)
         {
-            Vector3 pathPosition = pathCreator5.path.GetPointAtDistance(pathState);
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3(5000f , 0f, 0f));
+            TeleportTo(pathCreator5.path.GetPointAtDistance(pathState), Quaternion.LookRotation(Vector3.right, Vector3.up));
         }
+    }
+
+    private void TeleportTo(Vector3 position, Quaternion rotation)
+    {
+        myRigidbody.position = position;
+        myRigidbody.rotation = rotation;
+    }
+
+    private void CacheObstacleManager()
+    {
+        if (obstacleManager == null)
+        {
+            obstacleManager = FindObjectOfType<ObstacleManager>();
+        }
+    }
+
+    private void MoveAlongPath(PathCreator pathCreator, float finishDistance)
+    {
+        pathState += speed * Time.fixedDeltaTime;
+        if (pathState > finishDistance)
+        {
+            StartCoroutine(guanyat());
+            return;
+        }
+
+        Vector3 currentPosition = myRigidbody.position;
+        Vector3 pathPosition = pathCreator.path.GetPointAtDistance(pathState);
+        Vector3 pathPositionNext = pathCreator.path.GetPointAtDistance(pathState * 1.01f);
+        Vector3 targetPosition = new Vector3(pathPosition.x, currentPosition.y, pathPosition.z);
+        Vector3 targetForward = new Vector3(pathPositionNext.x, currentPosition.y, pathPositionNext.z) - targetPosition;
+
+        myRigidbody.useGravity = true;
+        myRigidbody.MovePosition(targetPosition);
+        if (targetForward.sqrMagnitude > 0.0001f)
+        {
+            myRigidbody.MoveRotation(Quaternion.LookRotation(targetForward.normalized, Vector3.up));
+        }
+
+        animator.SetBool("isMoving", true);
     }
 
     private void MouNivell1()
     {
-        pathState += speed * Time.deltaTime;
-        if (pathState > 480f)
-        {
-            StartCoroutine(guanyat()); 
-        }
-        else
-        {
-            Vector3 pathPosition = pathCreator1.path.GetPointAtDistance(pathState);
-            Vector3 pathPositionNext = pathCreator1.path.GetPointAtDistance(pathState * 1.01f);
-            myTransform.position = new Vector3((float)pathPosition.x, myTransform.position.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3((float)pathPositionNext.x, myTransform.position.y, (float)pathPositionNext.z));
-            animator.SetBool("isMoving", true);
-        }
+        MoveAlongPath(pathCreator1, 480f);
     }
 
     private void MouNivell2()
     {
-        pathState += speed * Time.deltaTime;
-        if (pathState > 309f)
-        {
-            StartCoroutine(guanyat());
-        }
-        else
-        {
-            Vector3 pathPosition = pathCreator2.path.GetPointAtDistance(pathState);
-            Vector3 pathPositionNext = pathCreator2.path.GetPointAtDistance(pathState * 1.01f);
-            myTransform.position = new Vector3((float)pathPosition.x, myTransform.position.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3((float)pathPositionNext.x, myTransform.position.y, (float)pathPositionNext.z));
-            animator.SetBool("isMoving", true);
-        }
+        MoveAlongPath(pathCreator2, 309f);
     }
 
     private void MouNivell3()
     {
-        pathState += speed * Time.deltaTime;
-        if (pathState > 372f)
-        {
-            StartCoroutine(guanyat());
-        }
-        else
-        {
-            Vector3 pathPosition = pathCreator3.path.GetPointAtDistance(pathState);
-            Vector3 pathPositionNext = pathCreator3.path.GetPointAtDistance(pathState * 1.01f);
-            myTransform.position = new Vector3((float)pathPosition.x, myTransform.position.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3((float)pathPositionNext.x, myTransform.position.y, (float)pathPositionNext.z));
-            animator.SetBool("isMoving", true);
-        }
+        MoveAlongPath(pathCreator3, 372f);
     }
 
     private void MouNivell4()
     {
-        pathState += speed * Time.deltaTime;
-        Vector3 pathPosition = pathCreator4.path.GetPointAtDistance(pathState);
-        Vector3 pathPositionNext = pathCreator4.path.GetPointAtDistance(pathState * 1.01f);
+        pathState += speed * Time.fixedDeltaTime;
         if (pathState > 387f)
         {
             StartCoroutine(guanyat());
+            return;
         }
-        else if (pathState > 286.0f)
+
+        Vector3 pathPosition = pathCreator4.path.GetPointAtDistance(pathState);
+        if (pathState > 286.0f)
         {
-            myRigidbody.useGravity = false; 
-            myTransform.position = new Vector3((float)pathPosition.x, (float)pathPosition.y, (float)pathPosition.z);
-            //transform.LookAt(new Vector3((float)pathPositionNext.x, (float)pathPosition.y, (float)pathPositionNext.z));
+            myRigidbody.useGravity = false;
+            myRigidbody.MovePosition(pathPosition);
             animator.SetBool("Climb", true);
         }
         else
         {
-            myTransform.position = new Vector3((float)pathPosition.x, myTransform.position.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3((float)pathPositionNext.x, myTransform.position.y, (float)pathPositionNext.z));
+            Vector3 currentPosition = myRigidbody.position;
+            Vector3 pathPositionNext = pathCreator4.path.GetPointAtDistance(pathState * 1.01f);
+            Vector3 targetPosition = new Vector3(pathPosition.x, currentPosition.y, pathPosition.z);
+            Vector3 targetForward = new Vector3(pathPositionNext.x, currentPosition.y, pathPositionNext.z) - targetPosition;
+
+            myRigidbody.useGravity = true;
+            myRigidbody.MovePosition(targetPosition);
+            if (targetForward.sqrMagnitude > 0.0001f)
+            {
+                myRigidbody.MoveRotation(Quaternion.LookRotation(targetForward.normalized, Vector3.up));
+            }
+
             animator.SetBool("isMoving", true);
             animator.SetBool("Climb", false);
         }
@@ -451,81 +504,49 @@ public class RedPlayerMovement : MonoBehaviour
 
     private void MouNivell5()
     {
-        pathState += speed * Time.deltaTime;
-        if (pathState > 632f)
-        {
-            StartCoroutine(guanyat());
-        }
-        else
-        {
-            Vector3 pathPosition = pathCreator5.path.GetPointAtDistance(pathState);
-            Vector3 pathPositionNext = pathCreator5.path.GetPointAtDistance(pathState * 1.01f);
-            myTransform.position = new Vector3((float)pathPosition.x, myTransform.position.y, (float)pathPosition.z);
-            transform.LookAt(new Vector3((float)pathPositionNext.x, myTransform.position.y, (float)pathPositionNext.z));
-            animator.SetBool("isMoving", true);
-        }
-
+        MoveAlongPath(pathCreator5, 632f);
     }
 
-    
     private IEnumerator restartNivell()
     {
         animator.SetBool("Climb", false);
+        ResetMoveInputGate();
         yield return new WaitForSeconds(2f);
         StartCoroutine(canvasManager.transitionRedExposureNegre(2f));
         animator.SetBool("isFalling", false);
         yield return new WaitForSeconds(1f);
-        myRigidbody.velocity = Vector3.zero;
+        ClearPhysicsMotion();
         ComensaNivell(currentNivell);
+        ResetMoveInputGate();
         yield return new WaitForSeconds(1f);
-        fentRestart = false; 
-        yield return null; 
+        fentRestart = false;
     }
 
     private IEnumerator canviaNivell(int nivell)
     {
-        //yield return new WaitForSeconds(2f);
         animator.SetBool("Climb", false);
+        ResetMoveInputGate();
         StartCoroutine(volumeManager.transitionExposureBlanc(2f));
         yield return new WaitForSeconds(1f);
-        myRigidbody.velocity = Vector3.zero;
+        ClearPhysicsMotion();
         animator.SetBool("RedWin", false);
         animator.SetBool("RedCry", false);
         ComensaNivell(nivell);
+        ResetMoveInputGate();
         yield return new WaitForSeconds(1f);
         canviantNivell = false;
-        guanyatRed = false; 
+        guanyatRed = false;
         perdutRed = false;
-        yield return null;
     }
 
-    
     private IEnumerator guanyat()
     {
-        Winsound.Play(); 
-        StartCoroutine(bluePlayer.perdut()); 
+        Winsound.Play();
+        StartCoroutine(bluePlayer.perdut());
         guanyatRed = true;
         canviantNivell = true;
+        ResetMoveInputGate();
         animator.SetBool("RedWin", true);
-        if (currentNivell != 5)
-        {
-            yield return new WaitForSeconds(3f);
-            StartCoroutine(canviaNivell(currentNivell+1));
-        }
-        else
-        {
-            canvasManager.guanyaCredits(); 
-        }
-
-
-    }
-
-
-    public IEnumerator perdut()
-    {
-        perdutRed = true;
-        canviantNivell = true;
-        animator.SetBool("RedCry", true);
         if (currentNivell != 5)
         {
             yield return new WaitForSeconds(3f);
@@ -533,18 +554,25 @@ public class RedPlayerMovement : MonoBehaviour
         }
         else
         {
-            //nothing
-            yield return null; 
+            canvasManager.guanyaCredits();
         }
-
-
     }
 
+    public IEnumerator perdut()
+    {
+        perdutRed = true;
+        canviantNivell = true;
+        ResetMoveInputGate();
+        animator.SetBool("RedCry", true);
+        if (currentNivell != 5)
+        {
+            yield return new WaitForSeconds(3f);
+            StartCoroutine(canviaNivell(currentNivell + 1));
+        }
+    }
 
     public void ComensaPrincipi()
     {
-        ComensaNivell(1); 
+        ComensaNivell(1);
     }
-
-
 }

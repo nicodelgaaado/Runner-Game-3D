@@ -220,17 +220,32 @@ public class ObstacleManager : MonoBehaviour
     public BoxCollider picoBoxa2Colider;
     public BoxCollider picoBoxa3Colider;
     public BoxCollider picoBoxa4Colider;
-    public AudioSource magicTecles; 
+    public AudioSource magicTecles;
+    private readonly WaitForFixedUpdate waitForFixedUpdate = new WaitForFixedUpdate();
+    private readonly Dictionary<Transform, Rigidbody> hazardRigidbodies = new Dictionary<Transform, Rigidbody>();
+    private readonly Dictionary<int, List<Transform>> levelHazardRoots = new Dictionary<int, List<Transform>>();
+    private readonly Dictionary<int, List<Collider>> levelHazardColliders = new Dictionary<int, List<Collider>>();
+    private readonly HashSet<Collider> allHazardColliders = new HashSet<Collider>();
+    private int activeLevel;
+    private float level3PendulumTime;
 
 
 
 
 
+
+    private void Awake()
+    {
+        invulnerable = false;
+        activeLevel = 0;
+        InitializeHazardGroups();
+        ConfigureAnimatedHazards();
+        RefreshHazardState();
+    }
 
     // Start is called before the first frame update
     void Start()
     {
-        invulnerable = false; 
         //Nivell 2
         posicioInicialYPunxa1 = punxes1.position.y;
         posicioInicialYPunxa2 = punxes2.position.y;
@@ -276,7 +291,7 @@ public class ObstacleManager : MonoBehaviour
 
         //Nivell 5
         StartCoroutine(MouPorta2());
-        porta31.Rotate(0f, -90, 0f, Space.Self);
+        RotateHazard(porta31, new Vector3(0f, -90f, 0f), Space.Self);
         StartCoroutine(MouPorta4());
         StartCoroutine(MouRoda2());
         posicioInicialZd8 = d8.localPosition.z;
@@ -300,54 +315,8 @@ public class ObstacleManager : MonoBehaviour
 
     }
 
-    // Update is called once per frame
     void Update()
     {
-        Girador1.Rotate(0f, -speedGirador1 * Time.deltaTime, 0f, Space.Self);
-        Girador2.Rotate(0f, -speedGirador2 * Time.deltaTime, 0f, Space.Self);
-        Torus1Nivell1.Rotate(0f, 0f, -speedTorus1Nivell1 * Time.deltaTime, Space.Self);
-        Torus2Nivell1.Rotate(0f,0f, speedTorus2Nivell1 * Time.deltaTime, Space.Self);
-
-
-        //Nivell 3
-        float angle = MaxAngleDeflectionPendulum1 * Mathf.Sin(Time.time * SpeedPendulum1);
-        pendulum1.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = MaxAngleDeflectionPendulum2 * Mathf.Sin(Time.time * SpeedPendulum2);
-        pendulum2.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = -MaxAngleDeflectionPendulum3 * Mathf.Sin(Time.time * SpeedPendulum3);
-        pendulum3.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = MaxAngleDeflectionPendulum4 * Mathf.Sin(Time.time * SpeedPendulum4);
-        pendulum4.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = -MaxAngleDeflectionPendulum5 * Mathf.Sin(Time.time * SpeedPendulum5);
-        pendulum5.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = MaxAngleDeflectionPendulum6 * Mathf.Sin(Time.time * SpeedPendulum6);
-        pendulum6.localRotation = Quaternion.Euler(0, 0, angle);
-        angle = -MaxAngleDeflectionPendulum7 * Mathf.Sin(Time.time * SpeedPendulum7);
-        pendulum7.localRotation = Quaternion.Euler(0, 0, angle);
-        aspa1.Rotate(-speedaspa1 * Time.deltaTime, 0f, 0f, Space.Self);
-        aspa2.Rotate(speedaspa2 * Time.deltaTime, 0f, 0f, Space.Self);
-
-
-        //Nivell 4
-        Torus3.Rotate(0f, 0f, -speedTorus3 * Time.deltaTime, Space.Self);
-        aspa3.Rotate(-speedaspa3 * Time.deltaTime, 0f, 0f, Space.Self);
-        aspa4.Rotate(-speedaspa4 * Time.deltaTime, 0f, 0f, Space.Self);
-
-
-
-        //Nivell 5
-        porta11.Rotate(0f, -speedPorta1 * Time.deltaTime, 0f, Space.Self);
-        porta12.Rotate(0f, speedPorta1 * Time.deltaTime, 0f, Space.Self);
-
-        porta31.Rotate(0f, -speedPorta3 * Time.deltaTime, 0f, Space.Self);
-        porta32.Rotate(0f, speedPorta3 * Time.deltaTime, 0f, Space.Self);
-
-        Roda1.Rotate(0f, 0f, -speedRoda1 * Time.deltaTime, Space.Self);
-        Girador3.Rotate(0f, speedGirador3 * Time.deltaTime, 0f, Space.Self);
-
-
-
-
         //Lo de la invulnerabilitat
         if (Input.GetKeyDown(KeyCode.G))
         {
@@ -369,10 +338,267 @@ public class ObstacleManager : MonoBehaviour
 
     }
 
+    private void FixedUpdate()
+    {
+        if (IsLevelActive(2))
+        {
+            RotateHazard(Girador1, new Vector3(0f, -speedGirador1 * Time.fixedDeltaTime, 0f), Space.Self);
+            RotateHazard(Girador2, new Vector3(0f, -speedGirador2 * Time.fixedDeltaTime, 0f), Space.Self);
+        }
+
+        if (IsLevelActive(1))
+        {
+            RotateHazard(Torus1Nivell1, new Vector3(0f, 0f, -speedTorus1Nivell1 * Time.fixedDeltaTime), Space.Self);
+            RotateHazard(Torus2Nivell1, new Vector3(0f, 0f, speedTorus2Nivell1 * Time.fixedDeltaTime), Space.Self);
+        }
+
+        if (IsLevelActive(3))
+        {
+            level3PendulumTime += Time.fixedDeltaTime;
+
+            float angle = MaxAngleDeflectionPendulum1 * Mathf.Sin(level3PendulumTime * SpeedPendulum1);
+            SetHazardLocalRotation(pendulum1, Quaternion.Euler(0f, 0f, angle));
+            angle = MaxAngleDeflectionPendulum2 * Mathf.Sin(level3PendulumTime * SpeedPendulum2);
+            SetHazardLocalRotation(pendulum2, Quaternion.Euler(0f, 0f, angle));
+            angle = -MaxAngleDeflectionPendulum3 * Mathf.Sin(level3PendulumTime * SpeedPendulum3);
+            SetHazardLocalRotation(pendulum3, Quaternion.Euler(0f, 0f, angle));
+            angle = MaxAngleDeflectionPendulum4 * Mathf.Sin(level3PendulumTime * SpeedPendulum4);
+            SetHazardLocalRotation(pendulum4, Quaternion.Euler(0f, 0f, angle));
+            angle = -MaxAngleDeflectionPendulum5 * Mathf.Sin(level3PendulumTime * SpeedPendulum5);
+            SetHazardLocalRotation(pendulum5, Quaternion.Euler(0f, 0f, angle));
+            angle = MaxAngleDeflectionPendulum6 * Mathf.Sin(level3PendulumTime * SpeedPendulum6);
+            SetHazardLocalRotation(pendulum6, Quaternion.Euler(0f, 0f, angle));
+            angle = -MaxAngleDeflectionPendulum7 * Mathf.Sin(level3PendulumTime * SpeedPendulum7);
+            SetHazardLocalRotation(pendulum7, Quaternion.Euler(0f, 0f, angle));
+            RotateHazard(aspa1, new Vector3(-speedaspa1 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
+            RotateHazard(aspa2, new Vector3(speedaspa2 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
+        }
+
+        if (IsLevelActive(4))
+        {
+            RotateHazard(Torus3, new Vector3(0f, 0f, -speedTorus3 * Time.fixedDeltaTime), Space.Self);
+            RotateHazard(aspa3, new Vector3(-speedaspa3 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
+            RotateHazard(aspa4, new Vector3(-speedaspa4 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
+        }
+
+        if (IsLevelActive(5))
+        {
+            RotateHazard(porta11, new Vector3(0f, -speedPorta1 * Time.fixedDeltaTime, 0f), Space.Self);
+            RotateHazard(porta12, new Vector3(0f, speedPorta1 * Time.fixedDeltaTime, 0f), Space.Self);
+            RotateHazard(porta31, new Vector3(0f, -speedPorta3 * Time.fixedDeltaTime, 0f), Space.Self);
+            RotateHazard(porta32, new Vector3(0f, speedPorta3 * Time.fixedDeltaTime, 0f), Space.Self);
+            RotateHazard(Roda1, new Vector3(0f, 0f, -speedRoda1 * Time.fixedDeltaTime), Space.Self);
+            RotateHazard(Girador3, new Vector3(0f, speedGirador3 * Time.fixedDeltaTime, 0f), Space.Self);
+        }
+    }
+
+    private void ConfigureAnimatedHazards()
+    {
+        foreach (KeyValuePair<int, List<Transform>> levelGroup in levelHazardRoots)
+        {
+            foreach (Transform hazardRoot in levelGroup.Value)
+            {
+                ConfigureKinematicRigidbody(hazardRoot);
+            }
+        }
+    }
+
+    private void InitializeHazardGroups()
+    {
+        levelHazardRoots.Clear();
+        levelHazardColliders.Clear();
+        allHazardColliders.Clear();
+
+        RegisterHazardGroup(1, Torus1Nivell1, Torus2Nivell1, d1, d2, d3);
+        RegisterHazardGroup(2, punxes1, punxes2, punxes3, punxes4, punxes6, punxes7, punxes8, punxes9, punxes10, punxes11, Girador1, Girador2);
+        RegisterHazardGroup(3, pendulum1, pendulum2, pendulum3, pendulum4, pendulum5, pendulum6, pendulum7, aspa1, aspa2);
+        RegisterHazardGroup(4, martell1, martell2, martell3, martell4, martell5, martell6, martell7, martell8, Torus3, aspa3, aspa4, Boxa1, Boxa2, Boxa3, Boxa4);
+        RegisterHazardGroup(5, porta11, porta12, porta21, porta22, porta31, porta32, porta41, porta42, Roda1, Roda2, d8, Girador3);
+    }
+
+    private void RegisterHazardGroup(int level, params Transform[] hazardRoots)
+    {
+        HashSet<Transform> uniqueRoots = new HashSet<Transform>();
+        foreach (Transform hazardRoot in hazardRoots)
+        {
+            if (hazardRoot != null)
+            {
+                uniqueRoots.Add(hazardRoot);
+            }
+        }
+
+        List<Transform> roots = new List<Transform>(uniqueRoots);
+        levelHazardRoots[level] = roots;
+        CacheHazardColliders(level, roots);
+    }
+
+    private void CacheHazardColliders(int level, List<Transform> hazardRoots)
+    {
+        HashSet<Collider> levelColliders = new HashSet<Collider>();
+
+        foreach (Transform hazardRoot in hazardRoots)
+        {
+            Collider[] colliders = hazardRoot.GetComponentsInChildren<Collider>(true);
+            foreach (Collider hazardCollider in colliders)
+            {
+                if (hazardCollider == null)
+                {
+                    continue;
+                }
+
+                levelColliders.Add(hazardCollider);
+                allHazardColliders.Add(hazardCollider);
+            }
+        }
+
+        levelHazardColliders[level] = new List<Collider>(levelColliders);
+    }
+
+    public void SetActiveLevel(int level)
+    {
+        if (activeLevel == level)
+        {
+            return;
+        }
+
+        activeLevel = level;
+        RefreshHazardState();
+    }
+
+    private bool IsLevelActive(int level)
+    {
+        return activeLevel == level;
+    }
+
+    private void RefreshHazardState()
+    {
+        if (invulnerable)
+        {
+            SetAllHazardColliders(false);
+            return;
+        }
+
+        foreach (KeyValuePair<int, List<Collider>> levelGroup in levelHazardColliders)
+        {
+            bool enableColliders = levelGroup.Key == activeLevel;
+            foreach (Collider hazardCollider in levelGroup.Value)
+            {
+                if (hazardCollider != null)
+                {
+                    hazardCollider.enabled = enableColliders;
+                }
+            }
+        }
+    }
+
+    private void SetAllHazardColliders(bool enabled)
+    {
+        foreach (Collider hazardCollider in allHazardColliders)
+        {
+            if (hazardCollider != null)
+            {
+                hazardCollider.enabled = enabled;
+            }
+        }
+    }
+
+    private void ConfigureKinematicRigidbody(Transform hazardRoot)
+    {
+        if (hazardRoot == null)
+        {
+            return;
+        }
+
+        Rigidbody hazardRigidbody = hazardRoot.GetComponent<Rigidbody>();
+        if (hazardRigidbody == null)
+        {
+            hazardRigidbody = hazardRoot.gameObject.AddComponent<Rigidbody>();
+        }
+
+        hazardRigidbody.useGravity = false;
+        hazardRigidbody.isKinematic = true;
+        hazardRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+        hazardRigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+        hazardRigidbodies[hazardRoot] = hazardRigidbody;
+    }
+
+    private Rigidbody GetHazardRigidbody(Transform hazardRoot)
+    {
+        if (hazardRoot == null)
+        {
+            return null;
+        }
+
+        if (!hazardRigidbodies.TryGetValue(hazardRoot, out Rigidbody hazardRigidbody) || hazardRigidbody == null)
+        {
+            hazardRigidbody = hazardRoot.GetComponent<Rigidbody>();
+            if (hazardRigidbody != null)
+            {
+                hazardRigidbodies[hazardRoot] = hazardRigidbody;
+            }
+        }
+
+        return hazardRigidbody;
+    }
+
+    private void MoveHazardPosition(Transform hazardRoot, Vector3 worldPosition)
+    {
+        Rigidbody hazardRigidbody = GetHazardRigidbody(hazardRoot);
+        if (hazardRigidbody == null)
+        {
+            hazardRoot.position = worldPosition;
+            return;
+        }
+
+        hazardRigidbody.MovePosition(worldPosition);
+    }
+
+    private void MoveHazardRotation(Transform hazardRoot, Quaternion worldRotation)
+    {
+        Rigidbody hazardRigidbody = GetHazardRigidbody(hazardRoot);
+        if (hazardRigidbody == null)
+        {
+            hazardRoot.rotation = worldRotation;
+            return;
+        }
+
+        hazardRigidbody.MoveRotation(worldRotation);
+    }
+
+    private void TranslateHazard(Transform hazardRoot, Vector3 translation, Space relativeTo)
+    {
+        Vector3 worldDelta = relativeTo == Space.Self ? hazardRoot.TransformDirection(translation) : translation;
+        MoveHazardPosition(hazardRoot, hazardRoot.position + worldDelta);
+    }
+
+    private void RotateHazard(Transform hazardRoot, Vector3 eulerAngles, Space relativeTo)
+    {
+        Quaternion deltaRotation = Quaternion.Euler(eulerAngles);
+        Quaternion targetRotation = relativeTo == Space.Self
+            ? hazardRoot.rotation * deltaRotation
+            : deltaRotation * hazardRoot.rotation;
+
+        MoveHazardRotation(hazardRoot, targetRotation);
+    }
+
+    private void SetHazardLocalRotation(Transform hazardRoot, Quaternion localRotation)
+    {
+        Quaternion worldRotation = hazardRoot.parent != null
+            ? hazardRoot.parent.rotation * localRotation
+            : localRotation;
+
+        MoveHazardRotation(hazardRoot, worldRotation);
+    }
+
     private IEnumerator MouGrupPunxes1()
     {
         while (true)
         {
+            if (!IsLevelActive(2))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((punxes1.position.y > posicioInicialYPunxa1) && (pujantGrupPunxes1))
@@ -389,20 +615,20 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (pujantGrupPunxes1)
                 {
-                    punxes1.Translate(new Vector3(0f, speedGrupPunxes1Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes2.Translate(new Vector3(0f, speedGrupPunxes1Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes3.Translate(new Vector3(0f, speedGrupPunxes1Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes4.Translate(new Vector3(0f, speedGrupPunxes1Pujada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes1, new Vector3(0f, speedGrupPunxes1Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes2, new Vector3(0f, speedGrupPunxes1Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes3, new Vector3(0f, speedGrupPunxes1Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes4, new Vector3(0f, speedGrupPunxes1Pujada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
                 else
                 {
-                    punxes1.Translate(new Vector3(0f, -speedGrupPunxes1Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes2.Translate(new Vector3(0f, -speedGrupPunxes1Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes3.Translate(new Vector3(0f, -speedGrupPunxes1Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes4.Translate(new Vector3(0f, -speedGrupPunxes1Baixada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes1, new Vector3(0f, -speedGrupPunxes1Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes2, new Vector3(0f, -speedGrupPunxes1Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes3, new Vector3(0f, -speedGrupPunxes1Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes4, new Vector3(0f, -speedGrupPunxes1Baixada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -412,6 +638,11 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(2))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((punxes8.position.y > posicioInicialYPunxa8) && (pujantGrupPunxes2))
@@ -428,22 +659,22 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (pujantGrupPunxes2)
                 {
-                    punxes6.Translate(new Vector3(0f, speedGrupPunxes2Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes7.Translate(new Vector3(0f, speedGrupPunxes2Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes8.Translate(new Vector3(0f, speedGrupPunxes2Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes9.Translate(new Vector3(0f, speedGrupPunxes2Pujada * Time.deltaTime, 0f), Space.Self);
-                    punxes10.Translate(new Vector3(0f, speedGrupPunxes2Pujada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes6, new Vector3(0f, speedGrupPunxes2Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes7, new Vector3(0f, speedGrupPunxes2Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes8, new Vector3(0f, speedGrupPunxes2Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes9, new Vector3(0f, speedGrupPunxes2Pujada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes10, new Vector3(0f, speedGrupPunxes2Pujada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
                 else
                 {
-                    punxes6.Translate(new Vector3(0f, -speedGrupPunxes2Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes7.Translate(new Vector3(0f, -speedGrupPunxes2Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes8.Translate(new Vector3(0f, -speedGrupPunxes2Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes9.Translate(new Vector3(0f, -speedGrupPunxes2Baixada * Time.deltaTime, 0f), Space.Self);
-                    punxes10.Translate(new Vector3(0f, -speedGrupPunxes2Baixada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes6, new Vector3(0f, -speedGrupPunxes2Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes7, new Vector3(0f, -speedGrupPunxes2Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes8, new Vector3(0f, -speedGrupPunxes2Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes9, new Vector3(0f, -speedGrupPunxes2Baixada * Time.fixedDeltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes10, new Vector3(0f, -speedGrupPunxes2Baixada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -453,6 +684,11 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(2))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((punxes11.position.y > posicioInicialYPunxa11) && (pujantGrupPunxes3))
@@ -469,14 +705,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (pujantGrupPunxes3)
                 {
-                    punxes11.Translate(new Vector3(0f, speedGrupPunxes3Pujada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes11, new Vector3(0f, speedGrupPunxes3Pujada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
                 else
                 {
-                    punxes11.Translate(new Vector3(0f, -speedGrupPunxes3Baixada * Time.deltaTime, 0f), Space.Self);
+                    TranslateHazard(punxes11, new Vector3(0f, -speedGrupPunxes3Baixada * Time.fixedDeltaTime, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -486,6 +722,11 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(1))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((d1.localPosition.z > posicioInicialZd1) && (!fentEsquerrad1))
@@ -502,14 +743,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentEsquerrad1)
                 {
-                    d1.Translate(new Vector3(0f, 0f, -speedd1 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d1, new Vector3(0f, 0f, -speedd1 * Time.fixedDeltaTime), Space.Self);
                 }
                 else
                 {
-                    d1.Translate(new Vector3(0f, 0f, +speedd1 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d1, new Vector3(0f, 0f, +speedd1 * Time.fixedDeltaTime), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -519,30 +760,35 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(1))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((d2.localPosition.z > posicioInicialZd2) && (!fentEsquerrad2))
             {
                 fentEsquerrad2 = true;
-                yield return new WaitForSeconds(0f);
+                yield return waitForFixedUpdate;
             }
             else if ((d2.localPosition.z < (posicioInicialZd2 - ranged2)) && (fentEsquerrad2))
             {
                 fentEsquerrad2 = false;
-                yield return new WaitForSeconds(0f);
+                yield return waitForFixedUpdate;
             }
             else
             {
                 if (fentEsquerrad2)
                 {
-                    d2.Translate(new Vector3(0f, 0f, -speedd2 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d2, new Vector3(0f, 0f, -speedd2 * Time.fixedDeltaTime), Space.Self);
                 }
                 else
                 {
-                    d2.Translate(new Vector3(0f, 0f, +speedd2 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d2, new Vector3(0f, 0f, +speedd2 * Time.fixedDeltaTime), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -552,6 +798,11 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(1))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((d3.localPosition.z > posicioInicialZd3) && (!fentEsquerrad3))
@@ -568,14 +819,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentEsquerrad3)
                 {
-                    d3.Translate(new Vector3(0f, 0f, -speedd3 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d3, new Vector3(0f, 0f, -speedd3 * Time.fixedDeltaTime), Space.Self);
                 }
                 else
                 {
-                    d3.Translate(new Vector3(0f, 0f, +speedd3 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d3, new Vector3(0f, 0f, +speedd3 * Time.fixedDeltaTime), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -586,8 +837,13 @@ public class ObstacleManager : MonoBehaviour
         float angle = 0f; 
         while (true)
         {
+            if (!IsLevelActive(5))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
-            angle += -speedPorta2 * Time.deltaTime;
+            angle += -speedPorta2 * Time.fixedDeltaTime;
              
             if (angle < -180f)
             {
@@ -596,9 +852,9 @@ public class ObstacleManager : MonoBehaviour
             }
             else
             {
-                porta21.localRotation = Quaternion.Euler(0, angle, 0);
-                porta22.localRotation = Quaternion.Euler(0, -angle, 0);
-                yield return null;
+                SetHazardLocalRotation(porta21, Quaternion.Euler(0f, angle, 0f));
+                SetHazardLocalRotation(porta22, Quaternion.Euler(0f, -angle, 0f));
+                yield return waitForFixedUpdate;
             }
         }
 
@@ -609,8 +865,13 @@ public class ObstacleManager : MonoBehaviour
         float angle = 0f;
         while (true)
         {
+            if (!IsLevelActive(5))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
-            angle += -speedPorta4 * Time.deltaTime;
+            angle += -speedPorta4 * Time.fixedDeltaTime;
 
             if (angle < -180f)
             {
@@ -619,9 +880,9 @@ public class ObstacleManager : MonoBehaviour
             }
             else
             {
-                porta41.localRotation = Quaternion.Euler(-angle, 0, 0);
-                porta42.localRotation = Quaternion.Euler(-angle-90f, 0, 0);
-                yield return null;
+                SetHazardLocalRotation(porta41, Quaternion.Euler(-angle, 0f, 0f));
+                SetHazardLocalRotation(porta42, Quaternion.Euler(-angle - 90f, 0f, 0f));
+                yield return waitForFixedUpdate;
             }
         }
 
@@ -633,9 +894,14 @@ public class ObstacleManager : MonoBehaviour
         float angle = 0f; 
         while (true)
         {
+            if (!IsLevelActive(5))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
-            angle += speedRoda2 * Time.deltaTime;
-            current += speedRoda2 * Time.deltaTime; 
+            angle += speedRoda2 * Time.fixedDeltaTime;
+            current += speedRoda2 * Time.fixedDeltaTime; 
 
             if (current > 45f)
             {
@@ -644,8 +910,8 @@ public class ObstacleManager : MonoBehaviour
             }
             else
             {
-                Roda2.localRotation = Quaternion.Euler(90, 0, angle);
-                yield return null;
+                SetHazardLocalRotation(Roda2, Quaternion.Euler(90f, 0f, angle));
+                yield return waitForFixedUpdate;
             }
         }
         
@@ -655,6 +921,11 @@ public class ObstacleManager : MonoBehaviour
     {
         while (true)
         {
+            if (!IsLevelActive(5))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
 
             if ((d8.localPosition.z > posicioInicialZd8) && (!fentEsquerrad8))
@@ -671,14 +942,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentEsquerrad8)
                 {
-                    d8.Translate(new Vector3(0f, 0f, -speedd8 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d8, new Vector3(0f, 0f, -speedd8 * Time.fixedDeltaTime), Space.Self);
                 }
                 else
                 {
-                    d8.Translate(new Vector3(0f, 0f, +speedd8 * Time.deltaTime), Space.Self);
+                    TranslateHazard(d8, new Vector3(0f, 0f, +speedd8 * Time.fixedDeltaTime), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -691,10 +962,15 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true; 
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell1 * Time.deltaTime;
+                angle += -speedmartell1 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
@@ -702,13 +978,13 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell1.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null; 
+                    SetHazardLocalRotation(martell1, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate; 
                 }
             }
             else
             {
-                angle += speedmartell1 * Time.deltaTime;
+                angle += speedmartell1 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
@@ -717,8 +993,8 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell1.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null; 
+                    SetHazardLocalRotation(martell1, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate; 
                 }
             }
         }
@@ -731,10 +1007,15 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell2 * Time.deltaTime;
+                angle += -speedmartell2 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
@@ -742,13 +1023,13 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell2.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell2, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell2 * Time.deltaTime;
+                angle += speedmartell2 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
@@ -757,8 +1038,8 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell2.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell2, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -771,10 +1052,15 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell3 * Time.deltaTime;
+                angle += -speedmartell3 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
@@ -782,13 +1068,13 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell3.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell3, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell3 * Time.deltaTime;
+                angle += speedmartell3 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
@@ -797,8 +1083,8 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell3.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell3, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -811,10 +1097,15 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell4 * Time.deltaTime;
+                angle += -speedmartell4 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
@@ -822,13 +1113,13 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell4.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell4, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell4 * Time.deltaTime;
+                angle += speedmartell4 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
@@ -837,8 +1128,8 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell4.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell4, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -851,34 +1142,39 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell5 * Time.deltaTime;
+                angle += -speedmartell5 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell5.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell5, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell5 * Time.deltaTime;
+                angle += speedmartell5 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
                     fentdalt = true;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell5.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell5, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -891,10 +1187,15 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell6 * Time.deltaTime;
+                angle += -speedmartell6 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
@@ -902,13 +1203,13 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell6.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell6, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell6 * Time.deltaTime;
+                angle += speedmartell6 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
@@ -917,8 +1218,8 @@ public class ObstacleManager : MonoBehaviour
                 }
                 else
                 {
-                    martell6.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell6, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -931,34 +1232,39 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell7 * Time.deltaTime;
+                angle += -speedmartell7 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell7.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell7, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell7 * Time.deltaTime;
+                angle += speedmartell7 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
                     fentdalt = true;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell7.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell7, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -971,34 +1277,39 @@ public class ObstacleManager : MonoBehaviour
         bool fentdalt = true;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if (fentdalt)
             {
-                angle += -speedmartell8 * Time.deltaTime;
+                angle += -speedmartell8 * Time.fixedDeltaTime;
                 if (angle < -90f)
                 {
                     fentdalt = false;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell8.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell8, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
             else
             {
-                angle += speedmartell8 * Time.deltaTime;
+                angle += speedmartell8 * Time.fixedDeltaTime;
 
                 if (angle > 0f)
                 {
                     fentdalt = true;
-                    yield return new WaitForSeconds(0f);
+                    yield return waitForFixedUpdate;
                 }
                 else
                 {
-                    martell8.localRotation = Quaternion.Euler(0, 0, angle);
-                    yield return null;
+                    SetHazardLocalRotation(martell8, Quaternion.Euler(0f, 0f, angle));
+                    yield return waitForFixedUpdate;
                 }
             }
         }
@@ -1012,6 +1323,11 @@ public class ObstacleManager : MonoBehaviour
         float range = 4f;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if ((Boxa4.localPosition.x > (posicioInicialBoxa4X + range)) && (fentFora))
             {
@@ -1027,14 +1343,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentFora)
                 {
-                    Boxa4.Translate(new Vector3(speedboxa4 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa4, new Vector3(speedboxa4 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
                 else
                 {
-                    Boxa4.Translate(new Vector3(-speedboxa4 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa4, new Vector3(-speedboxa4 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -1046,6 +1362,11 @@ public class ObstacleManager : MonoBehaviour
         float range = 4f;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
 
             if ((Boxa3.localPosition.x > (posicioInicialBoxa3X + range)) && (fentFora))
             {
@@ -1061,14 +1382,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentFora)
                 {
-                    Boxa3.Translate(new Vector3(speedboxa3 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa3, new Vector3(speedboxa3 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
                 else
                 {
-                    Boxa3.Translate(new Vector3(-speedboxa3 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa3, new Vector3(-speedboxa3 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -1080,6 +1401,12 @@ public class ObstacleManager : MonoBehaviour
         float posicioInicialBoxa2X = Boxa2.localPosition.x + range;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
+
             if ((Boxa2.localPosition.x < (posicioInicialBoxa2X - range)) && (fentFora))
             {
                 fentFora = false;
@@ -1094,14 +1421,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentFora)
                 {
-                    Boxa2.Translate(new Vector3(speedboxa2 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa2, new Vector3(speedboxa2 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
                 else
                 {
-                    Boxa2.Translate(new Vector3(-speedboxa2 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa2, new Vector3(-speedboxa2 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -1113,6 +1440,12 @@ public class ObstacleManager : MonoBehaviour
         float posicioInicialBoxa1X = Boxa1.localPosition.x + range;
         while (true)
         {
+            if (!IsLevelActive(4))
+            {
+                yield return waitForFixedUpdate;
+                continue;
+            }
+
             if ((Boxa1.localPosition.x < (posicioInicialBoxa1X - range)) && (fentFora))
             {
                 fentFora = false;
@@ -1127,14 +1460,14 @@ public class ObstacleManager : MonoBehaviour
             {
                 if (fentFora)
                 {
-                    Boxa1.Translate(new Vector3(speedboxa1 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa1, new Vector3(speedboxa1 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
                 else
                 {
-                    Boxa1.Translate(new Vector3(-speedboxa1 * Time.deltaTime, 0f, 0f), Space.Self);
+                    TranslateHazard(Boxa1, new Vector3(-speedboxa1 * Time.fixedDeltaTime, 0f, 0f), Space.Self);
                 }
             }
-            yield return new WaitForSeconds(0f);
+            yield return waitForFixedUpdate;
         }
 
     }
@@ -1142,126 +1475,12 @@ public class ObstacleManager : MonoBehaviour
 
     private void treuColiders()
     {
-        Torus1Collider.enabled = false; 
-        Torus2Collider.enabled = false; 
-        punxes1Colider.enabled = false; 
-        punxes2Colider.enabled = false; 
-        punxes3Colider.enabled = false; 
-        punxes4Colider.enabled = false; 
-        punxes8Colider.enabled = false; 
-        punxes11Colider.enabled = false; 
-        cGran1Colider.enabled = false; 
-        cGran2Colider.enabled = false; 
-        d2Colider.enabled = false;
-        d1Colider.enabled = false; 
-        d3Colider.enabled = false; 
-        f11Colider.enabled = false; 
-        f22Colider.enabled = false; 
-        f33Colider.enabled = false; 
-        f44Colider.enabled = false; 
-        f55Colider.enabled = false; 
-        f66Colider.enabled = false;
-        f77Colider.enabled = false; 
-        pal2aspa1Colider.enabled = false;
-        pal1aspa1Colider.enabled = false; 
-        pal1aspa2Colider.enabled = false; 
-        pal2aspa2Colider.enabled = false; 
-        porta11Colider.enabled = false; 
-        porta12Colider.enabled = false; 
-        porta21Colider.enabled = false; 
-        porta22Colider.enabled = false; 
-        porta31Colider.enabled = false; 
-        porta32Colider.enabled = false; 
-        porta41Colider.enabled = false; 
-        porta42Colider.enabled = false; 
-        Roda1Objecte1Colider.enabled = false; 
-        Roda1Objecte2Colider.enabled = false; 
-        Roda1Objecte3Colider.enabled = false; 
-        Roda1Objecte4Colider.enabled = false; 
-        Roda4Objecte1Colider.enabled = false; 
-        Roda4Objecte2Colider.enabled = false; 
-        Roda4Objecte3Colider.enabled = false; 
-        Roda4Objecte4Colider.enabled = false;
-        d8Colider.enabled = false; 
-        cGran3Collider.enabled = false; 
-        picMartell1Colider.enabled = false; 
-        picMartell2Colider.enabled = false; 
-        picMartell3Colider.enabled = false; 
-        picMartell5Colider.enabled = false; 
-        picMartell6Colider.enabled = false; 
-        picMartell7Colider.enabled = false; 
-        picMartell8Colider.enabled = false; 
-        pal2aspa3Colider.enabled = false; 
-        pal1aspa3Colider.enabled = false; 
-        pal2aspa4Colider.enabled = false; 
-        pal1aspa4Colider.enabled = false; 
-        Torus3Colider.enabled = false; 
-        picoBoxa1Colider.enabled = false; 
-        picoBoxa2Colider.enabled = false; 
-        picoBoxa3Colider.enabled = false; 
-        picoBoxa4Colider.enabled = false; 
+        SetAllHazardColliders(false);
     }
 
     private void posaColiders()
     {
-        Torus1Collider.enabled = true; 
-        Torus2Collider.enabled = true; 
-        punxes1Colider.enabled = true; 
-        punxes2Colider.enabled = true; 
-        punxes3Colider.enabled = true; 
-        punxes4Colider.enabled = true; 
-        punxes8Colider.enabled = true; 
-        punxes11Colider.enabled = true; 
-        cGran1Colider.enabled = true; 
-        cGran2Colider.enabled = true; 
-        d2Colider.enabled = true;
-        d1Colider.enabled = true; 
-        d3Colider.enabled = true; 
-        f11Colider.enabled = true; 
-        f22Colider.enabled = true; 
-        f33Colider.enabled = true; 
-        f44Colider.enabled = true; 
-        f55Colider.enabled = true; 
-        f66Colider.enabled = true;
-        f77Colider.enabled = true; 
-        pal2aspa1Colider.enabled = true;
-        pal1aspa1Colider.enabled = true; 
-        pal1aspa2Colider.enabled = true; 
-        pal2aspa2Colider.enabled = true; 
-        porta11Colider.enabled = true; 
-        porta12Colider.enabled = true; 
-        porta21Colider.enabled = true; 
-        porta22Colider.enabled = true; 
-        porta31Colider.enabled = true; 
-        porta32Colider.enabled = true; 
-        porta41Colider.enabled = true; 
-        porta42Colider.enabled = true; 
-        Roda1Objecte1Colider.enabled = true; 
-        Roda1Objecte2Colider.enabled = true; 
-        Roda1Objecte3Colider.enabled = true; 
-        Roda1Objecte4Colider.enabled = true; 
-        Roda4Objecte1Colider.enabled = true; 
-        Roda4Objecte2Colider.enabled = true; 
-        Roda4Objecte3Colider.enabled = true; 
-        Roda4Objecte4Colider.enabled = true;
-        d8Colider.enabled = true; 
-        cGran3Collider.enabled = true; 
-        picMartell1Colider.enabled = true; 
-        picMartell2Colider.enabled = true; 
-        picMartell3Colider.enabled = true; 
-        picMartell5Colider.enabled = true; 
-        picMartell6Colider.enabled = true; 
-        picMartell7Colider.enabled = true; 
-        picMartell8Colider.enabled = true; 
-        pal2aspa3Colider.enabled = true; 
-        pal1aspa3Colider.enabled = true; 
-        pal2aspa4Colider.enabled = true; 
-        pal1aspa4Colider.enabled = true; 
-        Torus3Colider.enabled = true; 
-        picoBoxa1Colider.enabled = true; 
-        picoBoxa2Colider.enabled = true; 
-        picoBoxa3Colider.enabled = true; 
-        picoBoxa4Colider.enabled = true; 
+        RefreshHazardState();
     }
 
 }
